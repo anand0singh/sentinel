@@ -3,7 +3,7 @@ title SENTINEL Master Orchestrator
 color 0A
 cls
 echo ==============================================================================
-echo       SENTINEL: AUTONOMOUS CYBER DEFENSE PLATFORM (CYBER BRUTALISM)
+echo       SENTINEL: AUTONOMOUS CYBER DEFENSE PLATFORM
 echo ==============================================================================
 echo.
 echo [*] Checking and freeing ports 8000 and 3000...

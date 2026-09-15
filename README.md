@@ -1,6 +1,6 @@
 # ⚡ SENTINEL // Autonomous Cyber Defense Platform
 
-> **Real-time threat detection, multi-stage kill-chain graph correlation, and automated SOAR zero-trust containment built with Cyber Brutalism aesthetics.**
+> **Real-time threat detection, multi-stage kill-chain graph correlation, and automated SOAR zero-trust containment.**
 
 ---
 
