@@ -1,0 +1,75 @@
+# Vector Configuration for Sentinel Telemetry Ingestion
+# ECS Standard Ingestion Pipeline
+
+sources:
+  suricata_eve:
+    type: file
+    include:
+      - /var/log/suricata/eve.json
+    read_from: beginning
+
+  endpoint_socket:
+    type: socket
+    address: 0.0.0.0:9514
+    mode: tcp
+    decoding:
+      codec: json
+
+transforms:
+  normalize_suricata:
+    type: remap
+    inputs:
+      - suricata_eve
+    source: |
+      parsed, err = parse_json(.message)
+      if err == null {
+        .@timestamp = parsed.timestamp
+        .event.category = "network"
+        .event.dataset = "suricata"
+        .source.ip = parsed.src_ip
+        .source.port = to_int(parsed.src_port) ?? 0
+        .destination.ip = parsed.dest_ip
+        .destination.port = to_int(parsed.dest_port) ?? 0
+        .network.protocol = downcase(to_string(parsed.proto) ?? "unknown")
+        .network.community_id = parsed.community_id
+        
+        if exists(parsed.alert) {
+          .rule.name = parsed.alert.signature
+          .rule.id = to_string(parsed.alert.signature_id)
+          .event.severity = parsed.alert.severity
+        }
+      }
+
+  normalize_endpoint:
+    type: remap
+    inputs:
+      - endpoint_socket
+    source: |
+      .@timestamp = .timestamp ?? now()
+      .event.category = "endpoint"
+      .source.ip = .src_ip ?? "127.0.0.1"
+      .destination.ip = .dst_ip ?? "0.0.0.0"
+      .process.name = .comm
+      .process.pid = to_int(.pid) ?? 0
+      .process.parent.pid = to_int(.ppid) ?? 0
+      .process.command_line = .cmdline ?? ""
+      .user.id = to_string(.uid ?? 0)
+
+sinks:
+  kafka_network:
+    type: kafka
+    inputs:
+      - normalize_suricata
+    bootstrap_servers: kafka:9092
+    topic: telemetry-network
+    encoding:
+      codec: json
+
+  kafka_endpoint:
+    type: kafka
+    inputs:
+      - normalize_endpoint
+    bootstrap_servers: kafka:9092
+    topic: telemetry-endpoint
+    encoding:
+      codec: json

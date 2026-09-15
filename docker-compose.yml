@@ -1,0 +1,129 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: sentinel-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - sentinel-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: sentinel-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sentinel-net
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: sentinel-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./configs/kafka/kafka-init.sh:/scripts/kafka-init.sh
+    entrypoint: ["/bin/bash", "/scripts/kafka-init.sh"]
+    networks:
+      - sentinel-net
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: sentinel-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: sentinel
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: sentinel_clickhouse_password
+    volumes:
+      - ./configs/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sentinel-net
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: sentinel-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sentinel-net
+
+  sentinel-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    container_name: sentinel-engine
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env.example
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CLICKHOUSE_HOST: clickhouse
+      REDIS_HOST: redis
+    restart: unless-stopped
+    networks:
+      - sentinel-net
+
+  sentinel-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: sentinel-api
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env.example
+    ports:
+      - "8000:8000"
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      REDIS_HOST: redis
+    restart: unless-stopped
+    networks:
+      - sentinel-net
+
+networks:
+  sentinel-net:
+    driver: bridge
+
+volumes:
+  clickhouse_data:
+  redis_data:
